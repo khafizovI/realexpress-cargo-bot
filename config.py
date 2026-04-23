@@ -30,7 +30,7 @@ ADMIN_CHAT_IDS = _valid_ids(_parse_ids(os.getenv("ADMIN_CHAT_ID", os.getenv("ADM
 ADMIN_CHAT_ID = ADMIN_CHAT_IDS[0] if ADMIN_CHAT_IDS else None
 
 # Default admin username for user-facing hints
-DEFAULT_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "@MeDevs")
+DEFAULT_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "@Realexpress_admin")
 
 # Supported languages
 LANGUAGES = ["uz", "ru"]
