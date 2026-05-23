@@ -1,5 +1,6 @@
 ﻿"""User-facing handlers."""
 import logging
+from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware, Router, types
@@ -147,6 +148,19 @@ def is_back_text(text: str) -> bool:
     )
 
 
+def format_track_date(value: str | None) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return "-"
+
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d.%m.%Y", "%d-%m-%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(raw, fmt).strftime("%d.%m.%Y")
+        except ValueError:
+            continue
+    return raw
+
+
 # --- Handlers ---
 @router.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
@@ -285,14 +299,22 @@ async def handle_track_code(message: types.Message, state: FSMContext):
         )
         return
 
-    status = track["status"] or ("Yo'lda" if lang == "uz" else "В пути")
-    response = (
-        f"Trek: {track['track_code']}\n"
-        f"Reys: {track['flight_number']}\n"
-        f"Holat/Статус: {status}\n"
-        f"Kiritilgan: {track['created_at']}\n\n"
-        f"{get_text('track_next_hint', lang)}"
-    )
+    if lang == "ru":
+        response = (
+            f"🔢 Номер отслеживания: {track['track_code']}\n"
+            f"✈️ Рейс: {track['flight_number']}\n"
+            f"🇨🇳 На складе в Китае: {format_track_date(track['created_at'])}\n"
+            f"🕔 Примерное время прибытия: {format_track_date(track['estimated_arrival'])}\n\n"
+            f"{get_text('track_next_hint', lang)}"
+        )
+    else:
+        response = (
+            f"🔢 Kuzatuv raqami: {track['track_code']}\n"
+            f"✈️ Reys: {track['flight_number']}\n"
+            f"🇨🇳 Xitoy omborida: {format_track_date(track['created_at'])}\n"
+            f"🕔 Yetib kelish vaqti (taxminiy): {format_track_date(track['estimated_arrival'])}\n\n"
+            f"{get_text('track_next_hint', lang)}"
+        )
     await message.answer(response, reply_markup=tracking_menu(lang))
 
 

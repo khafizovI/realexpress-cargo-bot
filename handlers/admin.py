@@ -1,6 +1,7 @@
 """Admin handlers."""
 import logging
 import os
+from datetime import datetime
 from functools import wraps
 from tempfile import NamedTemporaryFile
 
@@ -19,6 +20,7 @@ router = Router()
 # --- States ---
 class AddTrackState(StatesGroup):
     waiting_for_flight = State()
+    waiting_for_estimated_arrival = State()
     waiting_for_codes = State()
 
 
@@ -113,6 +115,16 @@ def text_has(message: types.Message, *parts: str) -> bool:
 
 def is_back_text(text: str) -> bool:
     return text in ("⬅️ Orqaga", "⬅️ Назад")
+
+
+def normalize_date_input(value: str) -> str | None:
+    raw = (value or "").strip()
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(raw, fmt).strftime("%d.%m.%Y")
+        except ValueError:
+            continue
+    return None
 
 
 def price_edit_keyboard() -> types.InlineKeyboardMarkup:
@@ -244,6 +256,30 @@ async def add_track_start(message: types.Message, state: FSMContext):
 async def add_track_get_flight(message: types.Message, state: FSMContext):
     await state.update_data(flight_number=message.text.strip())
     lang = db.get_user_language(message.from_user.id)
+    prompt = (
+        "Taxminiy yetib kelish sanasini kiriting (masalan, 24.04.2026)."
+        if lang == "uz"
+        else "Введите примерную дату прибытия (например, 24.04.2026)."
+    )
+    await state.set_state(AddTrackState.waiting_for_estimated_arrival)
+    await message.answer(prompt)
+
+
+@router.message(AddTrackState.waiting_for_estimated_arrival)
+@admin_only
+async def add_track_get_estimated_arrival(message: types.Message, state: FSMContext):
+    lang = db.get_user_language(message.from_user.id)
+    estimated_arrival = normalize_date_input(message.text)
+    if not estimated_arrival:
+        prompt = (
+            "Sana noto'g'ri. Iltimos, 24.04.2026 ko'rinishida kiriting."
+            if lang == "uz"
+            else "Неверный формат даты. Введите в виде 24.04.2026."
+        )
+        await message.answer(prompt)
+        return
+
+    await state.update_data(estimated_arrival=estimated_arrival)
     prompt = "Trek kod(lar)ni kiriting." if lang == "uz" else "Введите трек-коды."
     await state.set_state(AddTrackState.waiting_for_codes)
     await message.answer(prompt)
@@ -254,11 +290,12 @@ async def add_track_get_flight(message: types.Message, state: FSMContext):
 async def add_track_save(message: types.Message, state: FSMContext):
     data = await state.get_data()
     flight = data.get("flight_number")
+    estimated_arrival = data.get("estimated_arrival")
     codes = [code.strip() for code in message.text.replace(",", " ").split() if code.strip()]
     lang = db.get_user_language(message.from_user.id)
     default_status = "В пути" if lang == "ru" else "Yo'lda"
     for code in codes:
-        db.add_track(code, flight, status=default_status)
+        db.add_track(code, flight, status=default_status, estimated_arrival=estimated_arrival)
     await state.clear()
     done = "Treklar saqlandi." if lang == "uz" else "Треки сохранены."
     await message.answer(done)

@@ -44,6 +44,7 @@ class Database:
                 track_code TEXT UNIQUE,
                 flight_number TEXT,
                 status TEXT DEFAULT 'Yo''lda',
+                estimated_arrival TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
             """
@@ -64,6 +65,13 @@ class Database:
             )
             """
         )
+
+        track_columns = {
+            row["name"]
+            for row in self.execute("PRAGMA table_info(tracks)", fetchall=True) or []
+        }
+        if "estimated_arrival" not in track_columns:
+            self.execute("ALTER TABLE tracks ADD COLUMN estimated_arrival TEXT")
 
         # Seed default settings
         defaults = {
@@ -121,14 +129,25 @@ class Database:
         return row["language"] if row and row["language"] else "uz"
 
     # --- Tracks ---
-    def add_track(self, track_code: str, flight_number: str, status: str = "Yo'lda") -> bool:
+    def add_track(
+        self,
+        track_code: str,
+        flight_number: str,
+        status: str = "Yo'lda",
+        estimated_arrival: Optional[str] = None,
+    ) -> bool:
         cur = self.conn.cursor()
         cur.execute(
             """
-            INSERT OR IGNORE INTO tracks(track_code, flight_number, status)
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO tracks(track_code, flight_number, status, estimated_arrival)
+            VALUES (?, ?, ?, ?)
             """,
-            (track_code.strip(), flight_number.strip(), status),
+            (
+                track_code.strip(),
+                flight_number.strip(),
+                status,
+                estimated_arrival.strip() if estimated_arrival else None,
+            ),
         )
         self.conn.commit()
         return cur.rowcount > 0
@@ -153,7 +172,7 @@ class Database:
 
     def list_tracks(self, limit: Optional[int] = None) -> List[sqlite3.Row]:
         query = """
-        SELECT track_code, flight_number, status, created_at
+        SELECT track_code, flight_number, status, estimated_arrival, created_at
         FROM tracks
         ORDER BY datetime(created_at) DESC
         """
