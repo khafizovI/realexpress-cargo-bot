@@ -24,6 +24,49 @@ class Database:
             return cur.fetchall()
         return None
 
+    def _table_columns(self, table_name: str) -> set[str]:
+        rows = self.execute(f"PRAGMA table_info({table_name})", fetchall=True) or []
+        return {row["name"] for row in rows}
+
+    def _has_unique_index(self, table_name: str, column_name: str) -> bool:
+        indexes = self.execute(f"PRAGMA index_list({table_name})", fetchall=True) or []
+        for index in indexes:
+            if not index["unique"]:
+                continue
+            index_name = index["name"]
+            columns = self.execute(f"PRAGMA index_info({index_name})", fetchall=True) or []
+            if any(column["name"] == column_name for column in columns):
+                return True
+        return False
+
+    def _ensure_users_schema(self):
+        user_columns = self._table_columns("users")
+        if "language" not in user_columns:
+            self.execute("ALTER TABLE users ADD COLUMN language TEXT")
+        if "created_at" not in user_columns:
+            self.execute("ALTER TABLE users ADD COLUMN created_at TEXT")
+            self.execute(
+                """
+                UPDATE users
+                SET created_at = CURRENT_TIMESTAMP
+                WHERE created_at IS NULL OR created_at = ''
+                """
+            )
+        if not self._has_unique_index("users", "user_id"):
+            self.execute(
+                """
+                DELETE FROM users
+                WHERE rowid NOT IN (
+                    SELECT MIN(rowid)
+                    FROM users
+                    GROUP BY user_id
+                )
+                """
+            )
+            self.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_user_id_unique ON users(user_id)"
+            )
+
     # --- Initialization ---
     def init_db(self):
         """Create tables and seed defaults."""
@@ -65,11 +108,9 @@ class Database:
             )
             """
         )
+        self._ensure_users_schema()
 
-        track_columns = {
-            row["name"]
-            for row in self.execute("PRAGMA table_info(tracks)", fetchall=True) or []
-        }
+        track_columns = self._table_columns("tracks")
         if "estimated_arrival" not in track_columns:
             self.execute("ALTER TABLE tracks ADD COLUMN estimated_arrival TEXT")
 
@@ -111,14 +152,17 @@ class Database:
 
     # --- Users ---
     def set_user_language(self, user_id: int, language: str):
-        self.execute(
-            """
-            INSERT INTO users(user_id, language)
-            VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET language = excluded.language
-            """,
-            (user_id, language),
+        cur = self.conn.cursor()
+        cur.execute(
+            "UPDATE users SET language = ? WHERE user_id = ?",
+            (language, user_id),
         )
+        if cur.rowcount == 0:
+            cur.execute(
+                "INSERT INTO users(user_id, language, created_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                (user_id, language),
+            )
+        self.conn.commit()
 
     def get_user_language(self, user_id: int) -> str:
         row = self.execute(
